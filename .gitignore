@@ -1,0 +1,15 @@
+*.swp
+*.swo
+*.swn
+
+# Build leavings
+MYMETA.json
+MYMETA.yml
+Makefile
+pm_to_blib
+blib/
+cover_db/
+.build
+# Anchored: unanchored, this also matches t/SolusVM-Client-Live.t, and a test
+# git will not show you is a test nobody runs.
+/SolusVM-Client-*
