@@ -43,6 +43,22 @@ an endpoint added upstream arrives by regenerating
 
 ["catalog"](#catalog) is how you find the one you want.
 
+## Two of nearly everything
+
+A good half of the API exists twice: `/servers` and `/plans` are the whole
+management node, and `/projects/{id}/servers` and `/projects/{id}/plans` are
+one project's view of it.  Which pair answers depends on what the token's
+account is, and an account with the `CLIENT` role gets `403 This action is
+unauthorized.` from the first pair and its own resources from the second.  So
+
+```perl
+$solus->get_list_of_servers()                       # administering a node
+$solus->get_list_of_project_servers( id => $id )    # using one
+```
+
+are both right, and picking the wrong one is not a bug in your credentials.
+`get_user_info` says which roles the token has.
+
 ## Calling an operation
 
 Named arguments, in one flat list.  Anything the path declares as a placeholder
@@ -107,16 +123,19 @@ to put somewhere else.
 
 ## catalog
 
-Returns a printable listing of the operations, one per line, with the verb, the
-path, what a listing can be filtered on, and the vendor's own summary:
+Returns a printable listing of the operations, one stanza each: the verb and the
+path, the vendor's summary, what a listing can be filtered on, and what a body
+takes, with the required properties starred.
 
 ```perl
 print $solus->catalog( like => qr/snapshot/ );
 ```
 
 `like` filters on the name, the path and the summary together.  With no
-arguments you get all 309, which is a lot, and still the fastest way to find out
-what the API is called.
+arguments you get the lot, which is a lot, and still the fastest way to find out
+what the API calls something -- and, since the properties of a body are not
+guessable from the ones the operation next to it takes, what to call the
+arguments once you have.
 
 ## login
 

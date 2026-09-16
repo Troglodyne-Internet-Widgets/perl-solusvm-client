@@ -40,38 +40,53 @@ my $solus = SolusVM::Client->new(
 );
 
 my $CREATED;
+my $PROJECT;
 
 subtest 'getting in' => sub {
     if ( $ENV{SOLUSVM_TOKEN} ) {
-        my $account = $solus->get_user_info();
-        ok( $account->{data}{email}, 'the token is good enough to be told whose it is' );
-        note("token belongs to $account->{data}{email}");
-        return;
+        my $account = $solus->get_user_info()->{data};
+        ok( $account->{email}, 'the token is good enough to be told whose it is' );
+        note( sprintf 'token belongs to %s, who is %s', $account->{email}, join q{, }, map { $_->{name} } @{ $account->{roles} // [] } );
+    }
+    else {
+        my $credentials = $solus->login();
+
+        ok( $credentials->{access_token}, 'the node gave us a token' );
+        ok( $credentials->{expires_at},   'and said when it stops working' );
+        note("token expires $credentials->{expires_at}");
+
+        is( $solus->token(), $credentials->{access_token}, 'and it is the one that gets used' );
     }
 
-    my $credentials = $solus->login();
-
-    ok( $credentials->{access_token}, 'the node gave us a token' );
-    ok( $credentials->{expires_at},   'and said when it stops working' );
-    note("token expires $credentials->{expires_at}");
-
-    is( $solus->token(), $credentials->{access_token}, 'and it is the one that gets used' );
+    $PROJECT = $ENV{SOLUSVM_PROJECT} // $solus->get_list_of_projects()->{data}[0]{id};
+    ok( $PROJECT, "there is a project ($PROJECT) to work in" );
 };
 
 subtest 'listings' => sub {
-    foreach my $listing (qw{get_list_of_locations get_list_of_plans get_list_of_os_images get_list_of_projects list_of_ssh_keys get_list_of_servers}) {
+    foreach my $listing (qw{get_list_of_projects get_list_of_locations get_list_of_os_images get_list_of_applications}) {
         my $answer = $solus->$listing();
         ok( ref $answer->{data} eq 'ARRAY', "$listing answered with a list" );
-        note( sprintf '%-24s %d of %s', $listing, scalar @{ $answer->{data} }, $solus->last_meta->{total} // '?' );
+        note( sprintf '%-26s %d of %s', $listing, scalar @{ $answer->{data} }, ( $solus->last_meta // {} )->{total} // 'no count given' );
+    }
+
+    # What a CLIENT can see is its projects' -- /servers and /plans are the
+    # whole node, and answer 403 to anybody who is not running it.  So the
+    # listings that matter are asked for by project, and this is the difference
+    # between a token that can provision and one that can administer.
+    foreach my $listing (qw{get_list_of_project_servers get_list_of_project_plans get_list_of_project_ssh_keys}) {
+        my $answer = $solus->$listing( id => $PROJECT );
+        ok( ref $answer->{data} eq 'ARRAY', "$listing answered with a list" );
+        note( sprintf '%-26s %d of %s', $listing, scalar @{ $answer->{data} }, ( $solus->last_meta // {} )->{total} // 'no count given' );
     }
 };
 
 subtest 'paginate' => sub {
-    my @servers = $solus->paginate('get_list_of_servers');
-    my $total   = $solus->last_meta->{total};
+    my @plans = $solus->paginate( 'get_list_of_project_plans', id => $PROJECT );
+    my $meta  = $solus->last_meta;
 
-    is( scalar @servers, $total, 'walking the pages gets as many servers as the node counted' ) if defined $total;
-    note( sprintf 'walked %d servers in %d pages', scalar @servers, $solus->last_meta->{last_page} // 1 );
+    is( scalar @plans, $meta->{total}, 'walking the pages gets as many plans as the node counted' );
+    ok( $meta->{last_page} > 1, 'and it took more than one page, so the walking was the thing being tested' );
+    note( sprintf 'walked %d plans over %d pages of %d', scalar @plans, $meta->{last_page}, $meta->{per_page} );
 };
 
 subtest 'a failure from the node itself' => sub {
@@ -87,18 +102,22 @@ subtest 'create and destroy a server' => sub {
     skip_all('set SOLUSVM_LIVE_CREATE=1 to spend real resources') unless $ENV{SOLUSVM_LIVE_CREATE};
 
     my $location = $ENV{SOLUSVM_LOCATION} // $solus->get_list_of_locations()->{data}[0]{id};
-    my $os       = $ENV{SOLUSVM_OS}       // $solus->get_list_of_os_images()->{data}[0]{versions}[0]{id};
+    my $os       = $ENV{SOLUSVM_OS}       // _an_os_image();
     my $plan     = $ENV{SOLUSVM_PLAN}     // _smallest_plan();
-    my $name     = "solusvm-client-$$.test";
+    my $name     = "solusvm-client-$$";
 
     ok( $location && $os && $plan, "there is a location ($location), an os image ($os) and a plan ($plan) to build with" );
 
-    my $made = $solus->create_a_new_server(
-        name      => $name,
-        location  => $location,
-        os        => $os,
-        plan      => $plan,
-        user_data => "#cloud-config\nruncmd:\n  - [ true ]\n",
+    # The project endpoint's body is not the node-wide one's: plan_id rather
+    # than plan, and so on down.  Asking the catalog for both create operations
+    # is the difference, spelled out.
+    my $made = $solus->create_a_new_project_server(
+        id                  => $PROJECT,
+        name                => $name,
+        location_id         => $location,
+        os_image_version_id => $os,
+        plan_id             => $plan,
+        user_data           => "#cloud-config\nruncmd:\n  - [ true ]\n",
     );
 
     $CREATED = $made->{data}{id};
@@ -113,8 +132,16 @@ subtest 'create and destroy a server' => sub {
     undef $CREATED;
 };
 
+# The cheapest thing the node will build, which is what a test that is going to
+# throw it away immediately should be asking for.
+sub _an_os_image {
+    my ($image) = grep { $_->{name} =~ m/debian/i } @{ $solus->get_list_of_os_images()->{data} };
+    ($image) //= $solus->get_list_of_os_images()->{data}[0];
+    return $image->{versions}[0]{id};
+}
+
 sub _smallest_plan {
-    my @plans = sort { ( $a->{params}{ram} // 0 ) <=> ( $b->{params}{ram} // 0 ) } @{ $solus->get_list_of_plans()->{data} };
+    my @plans = sort { ( $a->{params}{ram} // 0 ) <=> ( $b->{params}{ram} // 0 ) } $solus->paginate( 'get_list_of_project_plans', id => $PROJECT );
     return $plans[0]{id};
 }
 

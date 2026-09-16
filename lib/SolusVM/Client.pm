@@ -48,6 +48,20 @@ L<SolusVM::Client::Specification> rather than by writing a method.
 
 L</catalog> is how you find the one you want.
 
+=head2 Two of nearly everything
+
+A good half of the API exists twice: C</servers> and C</plans> are the whole
+management node, and C</projects/{id}/servers> and C</projects/{id}/plans> are
+one project's view of it.  Which pair answers depends on what the token's
+account is, and an account with the C<CLIENT> role gets C<403 This action is
+unauthorized.> from the first pair and its own resources from the second.  So
+
+    $solus->get_list_of_servers()                       # administering a node
+    $solus->get_list_of_project_servers( id => $id )    # using one
+
+are both right, and picking the wrong one is not a bug in your credentials.
+C<get_user_info> says which roles the token has.
+
 =head2 Calling an operation
 
 Named arguments, in one flat list.  Anything the path declares as a placeholder
@@ -197,14 +211,17 @@ sub token ($self) {
 
 =method catalog
 
-Returns a printable listing of the operations, one per line, with the verb, the
-path, what a listing can be filtered on, and the vendor's own summary:
+Returns a printable listing of the operations, one stanza each: the verb and the
+path, the vendor's summary, what a listing can be filtered on, and what a body
+takes, with the required properties starred.
 
     print $solus->catalog( like => qr/snapshot/ );
 
 C<like> filters on the name, the path and the summary together.  With no
-arguments you get all 309, which is a lot, and still the fastest way to find out
-what the API is called.
+arguments you get the lot, which is a lot, and still the fastest way to find out
+what the API calls something -- and, since the properties of a body are not
+guessable from the ones the operation next to it takes, what to call the
+arguments once you have.
 
 =cut
 
@@ -216,9 +233,12 @@ sub catalog ( $self, %options ) {
 
     my $listing = q{};
     foreach my $entry (@wanted) {
-        my $query = @{ $entry->{query_params} } ? ' [' . join( q{ }, @{ $entry->{query_params} } ) . ']' : q{};
-        $listing .= sprintf "%-46s %-6s %s%s\n", $entry->{name}, $entry->{method}, $entry->{uri}, $query;
-        $listing .= sprintf "%-46s %s\n", q{}, $entry->{summary} if length $entry->{summary};
+        my %required = map { $_ => 1 } @{ $entry->{required} };
+
+        $listing .= sprintf "%-46s %-6s %s\n",   $entry->{name}, $entry->{method}, $entry->{uri};
+        $listing .= sprintf "%-46s %s\n",        q{}, $entry->{summary} if length $entry->{summary};
+        $listing .= sprintf "%-46s query: %s\n", q{}, join q{ }, @{ $entry->{query_params} }                                   if @{ $entry->{query_params} };
+        $listing .= sprintf "%-46s body:  %s\n", q{}, join q{ }, map { $required{$_} ? "$_*" : $_ } @{ $entry->{body_params} } if @{ $entry->{body_params} };
     }
 
     return $listing;

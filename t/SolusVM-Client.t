@@ -61,6 +61,8 @@ subtest 'catalog' => sub {
     like( $listing, qr{get_list_of_server_snapshots\s+GET\s+\Q/servers/{id}/snapshots\E}, 'it says the verb and the path' );
     unlike( $listing, qr/get_list_of_servers\s/, 'and leaves out what was not asked for' );
 
+    like( client()->catalog( like => qr/create_a_new_project_server/ ), qr/body:\s+.*\bplan_id[*]/, 'and what a body takes, with the required ones starred' );
+
     my @lines = split "\n", client()->catalog();
     ok( scalar @lines > 309, 'the whole catalog is all of it, summaries and all' );
 };

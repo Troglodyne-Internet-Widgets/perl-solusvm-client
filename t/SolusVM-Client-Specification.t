@@ -25,8 +25,17 @@ use SolusVM::Client::Specification ();
 # body, and one of SolusVM's unnamed operations.
 sub document {
     return {
-        openapi => '3.0.0',
-        paths   => {
+        openapi    => '3.0.0',
+        components => {
+            schemas => {
+                ServerCreateRequest => {
+                    type       => 'object',
+                    required   => [ 'name', 'plan_id' ],
+                    properties => { name => { type => 'string' }, plan_id => { type => 'integer' }, user_data => { type => 'string' } },
+                },
+            },
+        },
+        paths => {
             '/servers' => {
                 get => {
                     operationId => 'get-list-of-servers',
@@ -38,7 +47,11 @@ sub document {
                     operationId => 'create-a-new-server',
                     tags        => ['Servers'],
                     summary     => 'Create a Server',
-                    requestBody => { required => 1, content => {} },
+
+                    # Through a reference, because that is how SolusVM shares a
+                    # body between operations and a distiller that does not
+                    # follow one learns nothing from it.
+                    requestBody => { required => 1, content => { 'application/json' => { schema => { '$ref' => '#/components/schemas/ServerCreateRequest' } } } },
                 },
             },
             '/servers/{id}' => {
@@ -89,6 +102,8 @@ subtest 'distil' => sub {
             field uri          => '/servers/{id}';
             field path_params  => ['id'];
             field query_params => [];
+            field body_params  => [];
+            field required     => [];
             field has_body     => 0;
             field tag          => 'Servers';
             field summary      => q{};
