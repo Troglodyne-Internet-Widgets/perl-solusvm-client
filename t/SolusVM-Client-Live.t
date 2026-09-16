@@ -18,24 +18,37 @@ use SolusVM::Client ();
 #
 #   AUTHOR_TESTING=1 SOLUSVM_HOST=... SOLUSVM_USER=... SOLUSVM_PASS=... prove -lmv t/SolusVM-Client-Live.t
 #
+# or, on a node whose accounts come from an identity provider and so have no
+# password to give, with a token made in the panel:
+#
+#   AUTHOR_TESTING=1 SOLUSVM_HOST=... SOLUSVM_TOKEN=... prove -lmv t/SolusVM-Client-Live.t
+#
 # Everything above is read-only.  Creating and destroying a server costs real
 # resources on somebody's node, so it takes saying so again:
 #
 #   SOLUSVM_LIVE_CREATE=1
 #
 skip_all('acceptance test; set AUTHOR_TESTING=1 to run it') unless $ENV{AUTHOR_TESTING};
-skip_all('SOLUSVM_HOST, SOLUSVM_USER and SOLUSVM_PASS say which node to run it against')
-  unless $ENV{SOLUSVM_HOST} && $ENV{SOLUSVM_USER} && $ENV{SOLUSVM_PASS};
+skip_all('SOLUSVM_HOST, and then either SOLUSVM_TOKEN or SOLUSVM_USER and SOLUSVM_PASS, say which node to run it against and how to get in')
+  unless $ENV{SOLUSVM_HOST} && ( $ENV{SOLUSVM_TOKEN} || ( $ENV{SOLUSVM_USER} && $ENV{SOLUSVM_PASS} ) );
 
 my $solus = SolusVM::Client->new(
-    host     => $ENV{SOLUSVM_HOST},
-    email    => $ENV{SOLUSVM_USER},
-    password => $ENV{SOLUSVM_PASS},
+    host => $ENV{SOLUSVM_HOST},
+    $ENV{SOLUSVM_TOKEN}
+    ? ( token => $ENV{SOLUSVM_TOKEN} )
+    : ( email => $ENV{SOLUSVM_USER}, password => $ENV{SOLUSVM_PASS} ),
 );
 
 my $CREATED;
 
-subtest 'login' => sub {
+subtest 'getting in' => sub {
+    if ( $ENV{SOLUSVM_TOKEN} ) {
+        my $account = $solus->get_user_info();
+        ok( $account->{data}{email}, 'the token is good enough to be told whose it is' );
+        note("token belongs to $account->{data}{email}");
+        return;
+    }
+
     my $credentials = $solus->login();
 
     ok( $credentials->{access_token}, 'the node gave us a token' );

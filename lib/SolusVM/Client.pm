@@ -88,6 +88,16 @@ Passing both uses the token and keeps the credentials for when it expires.  Wher
 those arguments come from is the caller's business: this distribution reads no
 configuration file and no environment variable.
 
+C<POST /auth/login> authenticates against the management node's own user table,
+and nothing else.  A node that signs its people in through an identity provider
+instead -- SolusVM does this with Laravel Socialite, and the button on the login
+page is a plain link to C</api/v1/socialite/E<lt>providerE<gt>> -- sends a browser
+off to that provider and back, which is not a thing a client with no browser can
+do.  Those accounts have no password to give, so the token is the only way in:
+make one in the panel under Account, and C<create_a_new_account_api_token> will
+mint the rest.  Such a token does not expire, and this client will not try to
+renew it.
+
 =cut
 
 # What counts as "about to expire".  A token good for another half minute is one

@@ -34,7 +34,7 @@ $solus->delete_server( id => $made->{data}{id} );
 # DESCRIPTION
 
 Every method of this client comes out of the OpenAPI document SolusVM publishes
-for version 2 of its API.  All 309 operations are here, and they are named after
+for version 2 of its API.  All of its operations are here, and they are named after
 the `operationId` the vendor gave them, which is why they read the way they do:
 `get_list_of_servers`, `create_a_new_server`, `get_an_existing_api_token`.
 Nothing is hand-maintained, so nothing drifts from the published reference, and
@@ -57,9 +57,9 @@ and into the query string if it is a listing.  That rule is unambiguous because
 in the whole of the SolusVM API no operation takes both -- there is a test in
 this distribution that fails if a future specification changes that.
 
-The sixty-four write operations that declare no body -- every `delete_*`, and
-the actions like `server_start` that are entirely described by their path --
-take nothing else, and say so rather than quietly hanging an argument off the end
+The write operations that declare no body -- every `delete_*`, and the actions
+like `server_start` that are entirely described by their path -- take nothing
+else, and say so rather than quietly hanging an argument off the end
 of the URL where the API will ignore it.
 
 ```perl
@@ -166,11 +166,25 @@ Passing both uses the token and keeps the credentials for when it expires.  Wher
 those arguments come from is the caller's business: this distribution reads no
 configuration file and no environment variable.
 
+`POST /auth/login` authenticates against the management node's own user table,
+and nothing else.  A node that signs its people in through an identity provider
+instead -- SolusVM does this with Laravel Socialite, and the button on the login
+page is a plain link to `/api/v1/socialite/<provider>` -- sends a browser
+off to that provider and back, which is not a thing a client with no browser can
+do.  Those accounts have no password to give, so the token is the only way in:
+make one in the panel under Account, and `create_a_new_account_api_token` will
+mint the rest.  Such a token does not expire, and this client will not try to
+renew it.
+
 # AUTHORS
 
 Current Maintainers:
 
 - George S. Baugh <george@troglodyne.net>
+
+# CONTRIBUTOR
+
+Andy Baugh <andy@troglodyne.net>
 
 # COPYRIGHT AND LICENSE
 
