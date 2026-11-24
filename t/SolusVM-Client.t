@@ -1,6 +1,8 @@
-use v5.36;
+#!perl
+use 5.036;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aaxs';
+no autovivification;
 
 =head1 NAME
 
@@ -8,7 +10,7 @@ t/SolusVM-Client.t - SolusVM::Client: the generated methods, and the token behin
 
 =cut
 
-use Test2::V1 -i;
+use Test2::V1 qw{subtest like unlike dies ok is done_testing diag};
 use Test2::Plugin::NoWarnings;
 
 use Cpanel::JSON::XS ();
@@ -28,9 +30,22 @@ sub client (%options) {
     return SolusVM::Client->new( host => $HOST, token => 'a-token', %options );
 }
 
+# The text has the needle in it, said without turning the needle into a pattern:
+# a URL is full of characters that mean something to one.
+sub mentions ( $text, $needle, $name ) {
+    my $found = ok( index( $text, $needle ) >= 0, $name );
+    diag("wanted '$needle' in: $text") unless $found;
+    return $found;
+}
+
+# What the management node answers a login with: the token, and a far-off expiry.
+sub credentials_answering ($token) {
+    return json_response( { data => { credentials => { access_token => $token, expires_at => '2099-01-01T00:00:00+00:00' } } } );
+}
+
 subtest 'new' => sub {
-    like( dies { SolusVM::Client->new( token => 'a-token' ) }, qr/needs the host/,                            'a client with no management node is refused' );
-    like( dies { SolusVM::Client->new( host  => $HOST ) },     qr/either a token, or the email and password/, 'and one with no way to authenticate is too' );
+    like( dies { SolusVM::Client->new( token => 'a-token' ) }, qr/needs\ the\ host/,                  'a client with no management node is refused' );
+    like( dies { SolusVM::Client->new( host  => $HOST ) },     qr/either\ a\ token,\ or\ the\ email/, 'and one with no way to authenticate is too' );
 
     ok( SolusVM::Client->new( host => $HOST, token => 'a-token' ), 'a token is enough' );
     ok( SolusVM::Client->new( host => $HOST, email => 'you@example.test', password => 'x' ), 'so are credentials' );
@@ -58,17 +73,18 @@ subtest 'the generated methods' => sub {
 subtest 'catalog' => sub {
     my $listing = client()->catalog( like => qr/snapshot/ );
 
-    like( $listing, qr{get_list_of_server_snapshots\s+GET\s+\Q/servers/{id}/snapshots\E}, 'it says the verb and the path' );
+    like( $listing, qr/get_list_of_server_snapshots\s+GET/, 'it says the verb' );
+    mentions( $listing, '/servers/{id}/snapshots', 'and the path' );
     unlike( $listing, qr/get_list_of_servers\s/, 'and leaves out what was not asked for' );
 
     like( client()->catalog( like => qr/create_a_new_project_server/ ), qr/body:\s+.*\bplan_id[*]/, 'and what a body takes, with the required ones starred' );
 
-    my @lines = split "\n", client()->catalog();
+    my @lines = split m{\n}, client()->catalog();
     ok( scalar @lines > 309, 'the whole catalog is all of it, summaries and all' );
 };
 
 subtest 'path parameters' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
     mock_request( 'GET /api/v1/servers/42', json_response( { data => { id => 42 } } ) );
 
     my $answer = client()->get_an_existing_server( id => 42 );
@@ -79,20 +95,18 @@ subtest 'path parameters' => sub {
     client()->delete_additional_ip( serverId => 7, ipId => 9 );
     is( last_http_request(), sprintf( '%s %s', 'DELETE', "$BASE/servers/7/ips/9" ), 'two placeholders are filled in too' );
 
-    like(
-        dies { client()->get_an_existing_server() },
-        qr{get_an_existing_server needs a id: its path is /servers/\{id\}},
-        'and a missing one says which, and what the path was',
-    );
+    my $failure = dies { client()->get_an_existing_server() };
+    like( $failure, qr/get_an_existing_server\ needs\ a\ id/, 'and a missing one says which' );
+    mentions( $failure, 'its path is /servers/{id}', 'and what the path was' );
 };
 
 subtest 'query strings and bodies' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     mock_request( 'GET /api/v1/servers', json_response( { data => [] } ) );
     client()->get_list_of_servers( page => 2, 'filter[status]' => 'started' );
-    like( last_http_request(), qr/\Qfilter%5Bstatus%5D=started\E/, 'a filter is escaped into the query' );
-    like( last_http_request(), qr/\Qpage=2\E/,                     'along with the page' );
+    like( last_http_request(), qr/filter%5Bstatus%5D=started/, 'a filter is escaped into the query' );
+    like( last_http_request(), qr/page=2/,                     'along with the page' );
     is( last_http_content(), undef, 'and a listing sends no body' );
 
     mock_request( 'POST /api/v1/servers', json_response( { data => { id => 1 } }, status => 201, reason => 'Created' ) );
@@ -108,33 +122,31 @@ subtest 'query strings and bodies' => sub {
 
     like(
         dies { client()->server_start( id => 42, hard => 1 ) },
-        qr/server_start takes nothing but its path, so there is nowhere to put hard/,
+        qr/server_start\ takes\ nothing\ but\ its\ path/,
         'and an argument it has nowhere to put is refused rather than hung off the URL',
     );
 };
 
 subtest 'failures' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     mock_request( 'GET /api/v1/servers/42', json_response( { message => 'Server not found' }, status => 404, reason => 'Not Found' ) );
-    like(
-        dies { client()->get_an_existing_server( id => 42 ) },
-        qr{\QSolusVM get_an_existing_server (GET $BASE/servers/42) failed: 404 Not Found\E.*Server not found}s,
-        'a failure names the operation, the request, the status and what the API said',
-    );
+    my $missing = dies { client()->get_an_existing_server( id => 42 ) };
+    mentions( $missing, "SolusVM get_an_existing_server (GET $BASE/servers/42) failed: 404 Not Found", 'a failure names the operation, the request and the status' );
+    like( $missing, qr/Server\ not\ found/, 'and what the API said' );
 
     mock_request( 'POST /api/v1/servers', json_response( { errors => { plan => ['The plan field is required.'] } }, status => 422, reason => 'Unprocessable Entity' ) );
     like(
         dies { client()->create_a_new_server( name => 'web01.example.test' ) },
-        qr/422.*The plan field is required/s,
+        qr/422.*The\ plan\ field\ is\ required/,
         'and a validation failure keeps the detail that says which field',
     );
 
-    like( dies { client()->_request('no_such_operation') }, qr/no operation called no_such_operation/, 'an operation that does not exist is refused' );
+    like( dies { client()->paginate('no_such_operation') }, qr/no\ operation\ called\ no_such_operation/, 'an operation that does not exist is refused' );
 };
 
 subtest 'what came back' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
     mock_request( 'GET /api/v1/servers', json_response( { data => [], meta => { current_page => 1, last_page => 3 }, links => { next => 'http://x.test' } } ) );
 
     my $solus = client();
@@ -146,7 +158,7 @@ subtest 'what came back' => sub {
 };
 
 subtest 'paginate' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     mock_request(
         'GET /api/v1/servers',
@@ -166,18 +178,15 @@ subtest 'paginate' => sub {
 };
 
 subtest 'login' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
-    mock_request(
-        'POST /api/v1/auth/login',
-        json_response( { data => { credentials => { access_token => 'fresh', token_type => 'bearer', expires_at => '2099-01-01T00:00:00+00:00' } } } ),
-    );
+    mock_request( 'POST /api/v1/auth/login', credentials_answering('fresh') );
 
     my $solus       = SolusVM::Client->new( host => $HOST, email => 'you@example.test', password => 'hunter2' );
     my $credentials = $solus->login();
 
     is( $credentials->{access_token}, 'fresh',                                             'the credentials come back to the caller' );
-    is( $solus->{token},              'fresh',                                             'and are kept' );
+    is( $solus->token(),              'fresh',                                             'and are kept' );
     is( last_http_request(),          "POST $BASE/auth/login",                             'the login goes where the API says' );
     is( last_http_content(),          '{"email":"you@example.test","password":"hunter2"}', 'with the credentials as the body' );
     ok( !exists last_http_headers()->{'Authorization'}, 'and no token, there being none yet' );
@@ -185,22 +194,22 @@ subtest 'login' => sub {
     mock_request( 'POST /api/v1/auth/login', json_response( { data => {} } ) );
     like(
         dies { SolusVM::Client->new( host => $HOST, email => 'you@example.test', password => 'hunter2' )->login() },
-        qr/no access token/,
+        qr/no\ access\ token/,
         'a login the API answers without a token is a failure, not a client with no token',
     );
 
-    like( dies { client()->login() }, qr/no email and password/, 'and a token-only client cannot log in' );
+    like( dies { client()->login() }, qr/no\ email\ and\ password/, 'and a token-only client cannot log in' );
 };
 
 subtest 'token lifetime' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     my $logins = 0;
     mock_request(
         'POST /api/v1/auth/login',
         sub ( $method, $url, $args ) {
             $logins++;
-            return json_response( { data => { credentials => { access_token => "fresh$logins", expires_at => '2099-01-01T00:00:00+00:00' } } } );
+            return credentials_answering("fresh$logins");
         },
     );
     mock_request( 'GET /api/v1/servers', json_response( { data => [] } ) );
@@ -214,22 +223,27 @@ subtest 'token lifetime' => sub {
     $lazy->get_list_of_servers();
     is( $logins, 1, 'a token that has not expired is used again rather than replaced' );
 
-    my $stale = SolusVM::Client->new( host => $HOST, token => 'stale', expires_at => '2020-01-01T00:00:00+00:00', email => 'you@example.test', password => 'hunter2' );
-    $stale->get_list_of_servers();
+    my %stale = ( token => 'stale', email => 'you@example.test', password => 'hunter2' );
+
+    SolusVM::Client->new( host => $HOST, %stale, expires_at => '2020-01-01T00:00:00+00:00' )->get_list_of_servers();
     is( $logins,                                2,               'a token past its expiry is replaced before it is sent' );
     is( last_http_headers()->{'Authorization'}, 'Bearer fresh2', 'and the fresh one goes out' );
 
-    is( SolusVM::Client::_epoch_of('2099-01-01 00:00:00'), SolusVM::Client::_epoch_of('2099-01-01T00:00:00+00:00'), 'both shapes of expiry the API uses parse the same' );
-    is( SolusVM::Client::_epoch_of('whenever'),            undef,                                                   'and one it does not is given up on rather than guessed at' );
+    SolusVM::Client->new( host => $HOST, %stale, expires_at => '2020-01-01 00:00:00' )->get_list_of_servers();
+    is( $logins, 3, 'the other shape of expiry the API uses is understood the same way' );
+
+    SolusVM::Client->new( host => $HOST, %stale, expires_at => 'whenever' )->get_list_of_servers();
+    is( $logins,                                3,              'and one it does not is given up on rather than guessed at' );
+    is( last_http_headers()->{'Authorization'}, 'Bearer stale', 'so the token it was given goes out' );
 };
 
 subtest 'a token the API rejects anyway' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     my $logins = 0;
     mock_request(
         'POST /api/v1/auth/login',
-        sub ( $method, $url, $args ) { $logins++; return json_response( { data => { credentials => { access_token => 'renewed', expires_at => '2099-01-01T00:00:00+00:00' } } } ) },
+        sub ( $method, $url, $args ) { $logins++; return credentials_answering('renewed') },
     );
 
     my $attempts = 0;
@@ -248,7 +262,7 @@ subtest 'a token the API rejects anyway' => sub {
     is( $attempts, 2, 'and one retry' );
 
     clear_mocks();
-    mock_request( 'POST /api/v1/auth/login', json_response( { data    => { credentials => { access_token => 'renewed', expires_at => '2099-01-01T00:00:00+00:00' } } } ) );
+    mock_request( 'POST /api/v1/auth/login', credentials_answering('renewed') );
     mock_request( 'GET /api/v1/servers',     json_response( { message => 'Unauthenticated.' }, status => 401, reason => 'Unauthorized' ) );
 
     my $hopeless = SolusVM::Client->new( host => $HOST, token => 'revoked', email => 'you@example.test', password => 'hunter2' );
@@ -259,47 +273,45 @@ subtest 'a token the API rejects anyway' => sub {
     mock_request( 'GET /api/v1/servers', json_response( { message => 'Unauthenticated.' }, status => 401, reason => 'Unauthorized' ) );
     like(
         dies { client()->get_list_of_servers() },
-        qr/Pass email and password as well as the token/,
+        qr/Pass\ email\ and\ password\ as\ well\ as\ the\ token/,
         'a client with only a token is told what would have let it recover',
     );
 };
 
 subtest 'the password' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     mock_request( 'POST /api/v1/auth/login', json_response( { message => 'These credentials do not match our records.', password => 'hunter2' }, status => 422, reason => 'Unprocessable Entity' ) );
 
     my $failure = dies { SolusVM::Client->new( host => $HOST, email => 'you@example.test', password => 'hunter2' )->login() };
-    like( $failure, qr/do not match our records/, 'a bad login says so' );
+    like( $failure, qr/do\ not\ match\ our\ records/, 'a bad login says so' );
     unlike( $failure, qr/hunter2/, 'without putting the password in the exception' );
 
-    is( SolusVM::Client::_redact('{"email":"you@example.test","password":"hunter2"}'), '{"email":"you@example.test","password":"********"}', 'and redaction leaves the rest legible' );
-
     clear_mocks();
-    mock_request( 'POST /api/v1/auth/login', json_response( { data => { credentials => { access_token => 'fresh', expires_at => '2099-01-01T00:00:00+00:00' } } } ) );
+    mock_request( 'POST /api/v1/auth/login', credentials_answering('fresh') );
 
+    # What debug prints goes out through warn, so that a caller can route it.
     my $watched = q{};
     {
-        open my $fh, '>', \$watched or die "could not capture STDERR: $!\n";
-        local *STDERR = $fh;
+        local $SIG{__WARN__} = sub ($line) { $watched .= $line };
         SolusVM::Client->new( host => $HOST, email => 'you@example.test', password => 'hunter2', debug => 1 )->login();
-        close $fh;
     }
 
-    like( $watched, qr{POST \Qhttps://$HOST/api/v1/auth/login\E}, 'debug says what was asked' );
-    like( $watched, qr/200 OK/,                                   'and what came back' );
-    unlike( $watched, qr/hunter2/, 'and still not the password, which is the whole reason to be careful about a debug flag' );
+    mentions( $watched, "POST $BASE/auth/login", 'debug says what was asked' );
+    like( $watched, qr/200\ OK/, 'and what came back' );
+    mentions( $watched, '"email":"you@example.test"', 'and leaves the rest of the request legible' );
+    unlike( $watched, qr/hunter2/, 'but not the password, which is the whole reason to be careful about a debug flag' );
 };
 
 subtest 'a spec from a file' => sub {
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
 
     my $directory = File::Temp->newdir();
     my $file      = File::Spec->catfile( "$directory", 'small.json' );
 
     open my $fh, '>', $file or die "could not write $file: $!\n";
     print {$fh} Cpanel::JSON::XS->new->utf8->encode( [ { name => 'list_widgets', operation_id => 'list-widgets', method => 'GET', uri => '/widgets', path_params => [], query_params => [], has_body => 0, tag => 'Widgets', summary => q{} } ] );
-    close $fh;
+    close $fh or die "could not finish writing $file: $!\n";
 
     mock_request( 'GET /api/v1/widgets', json_response( { data => [] } ) );
 

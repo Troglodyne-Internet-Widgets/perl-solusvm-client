@@ -1,8 +1,9 @@
 package SolusVM::Client::Specification;
 
-use v5.36;
+use 5.036;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aaxs';
+no autovivification;
 
 use Cpanel::JSON::XS    ();
 use File::Path          qw{make_path};
@@ -130,7 +131,7 @@ sub distil ($document) {
 # placeholder is guaranteed to appear, since appearing is what it is for.
 sub _entry ( $uri, $method, $operation, $resolve ) {
     my $id = $operation->{operationId};
-    die "$method $uri has no operationId, so there is nothing to name it after.\n" unless defined $id && length $id;
+    die "$method $uri has no operationId, so there is nothing to name it after.\n" unless $id;
 
     my @path_params  = $uri =~ m/[{](\w+)[}]/g;
     my @query_params = map { $_->{name} } grep { ( $_->{in} // q{} ) eq 'query' } @{ $operation->{parameters} // [] };
@@ -175,13 +176,13 @@ so that it can be.
 
 sub operation_name ( $operation_id, $method = undef, $uri = undef ) {
     my $name = lc $operation_id;
-    $name =~ s/[^a-z0-9]+/_/g;
+    $name =~ s/[[:^alnum:]]+/_/g;
     $name =~ s/^_+|_+$//g;
 
-    return $name                                                                                    unless _is_digest($operation_id) || $name !~ m/^[a-z]/;
+    return $name if !_is_digest($operation_id) && $name =~ m/^[[:lower:]]/;
     die "$operation_id is no kind of name, and there is no verb and path here to build one from.\n" unless defined $method && defined $uri;
 
-    my @segments = grep { length && index( $_, '{' ) != 0 } split '/', $uri;
+    my @segments = grep { $_ ne q{} && index( $_, '{' ) != 0 } split m{/}, $uri;
     return join '_', lc $method, @segments;
 }
 
@@ -189,7 +190,7 @@ sub operation_name ( $operation_id, $method = undef, $uri = undef ) {
 # name an operation.  Matching the shape rather than listing the thirteen means
 # the fourteenth is handled too.
 sub _is_digest ($operation_id) {
-    return $operation_id =~ m/^[0-9a-f]{32}$/ ? 1 : 0;
+    return $operation_id =~ m/^[[:xdigit:]]{32}$/ ? 1 : 0;
 }
 
 =func fetch
@@ -216,7 +217,7 @@ from, and it lives on a vendor development host.  Expect to need C<url> one day.
 
 sub fetch (%options) {
     my $dir = $options{dir};
-    die "fetch needs a directory to write the spec into.\n" unless defined $dir && length $dir;
+    die "fetch needs a directory to write the spec into.\n" unless $dir;
 
     my $url  = $options{url} // $SPEC_URL;
     my $file = File::Spec->catfile( $dir, $SPEC_FILE );
@@ -235,7 +236,8 @@ sub fetch (%options) {
     my $entries = distil( Cpanel::JSON::XS->new->utf8->decode( $response->{content} ) );
 
     make_path($dir) unless -d $dir;
-    File::Slurper::Temp::write_binary( $file, Cpanel::JSON::XS->new->utf8->canonical->encode($entries) );
+    my $json = Cpanel::JSON::XS->new()->utf8()->canonical();
+    File::Slurper::Temp::write_binary( $file, $json->encode($entries) );
 
     return $file;
 }
@@ -252,8 +254,8 @@ sub _resolver ($document) {
         die "A \$ref in this document points at itself, or close enough: $node->{'$ref'}\n" if $depth > 10;
 
         my $target = $document;
-        foreach my $step ( split '/', $node->{'$ref'} ) {
-            next if $step eq '#' || !length $step;
+        foreach my $step ( split m{/}, $node->{'$ref'} ) {
+            next if $step eq '#' || $step eq q{};
             $target = $target->{$step};
             return {} unless ref $target eq 'HASH';
         }

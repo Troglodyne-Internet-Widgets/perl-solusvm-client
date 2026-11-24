@@ -1,4 +1,8 @@
 Revision history for SolusVM-Client
 
+{{$NEXT}}
+    - The debug flag prints through warn, so a caller can route its output
+    - The code meets the harness critic profile
+
 0.001 2026-09-15 TEODESIAN
     - Initial Release
