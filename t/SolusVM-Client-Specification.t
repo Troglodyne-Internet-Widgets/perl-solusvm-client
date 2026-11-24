@@ -1,6 +1,8 @@
-use v5.36;
+#!perl
+use 5.036;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aaxs';
+no autovivification;
 
 =head1 NAME
 
@@ -8,7 +10,7 @@ t/SolusVM-Client-Specification.t - SolusVM::Client::Specification: what the clie
 
 =cut
 
-use Test2::V1 -i;
+use Test2::V1 qw{subtest like dies ok is hash field end etc done_testing};
 use Test2::Plugin::NoWarnings;
 
 use Cpanel::JSON::XS ();
@@ -77,12 +79,13 @@ subtest 'operation_name' => sub {
     );
 
     foreach my $case (@unnamed) {
-        is( SolusVM::Client::Specification::operation_name( $case->{id}, $case->{method}, $case->{uri} ), $case->{expected}, $case->{why} );
+        my ( $id, $method, $uri, $expected, $why ) = @{$case}{qw{id method uri expected why}};
+        is( SolusVM::Client::Specification::operation_name( $id, $method, $uri ), $expected, $why );
     }
 
     like(
         dies { SolusVM::Client::Specification::operation_name('86ea1c4590839d7621a96d1ae680ca44') },
-        qr/no kind of name/,
+        qr/no\ kind\ of\ name/,
         'a digest with no verb and path to fall back on is fatal',
     );
 };
@@ -117,10 +120,10 @@ subtest 'distil' => sub {
     is( $by_name{create_a_new_server}{has_body},     1,                        'while a create does' );
     is( $by_name{post_servers_start}{summary},       'Start Multiple Servers', 'an unnamed operation keeps its summary' );
 
-    like( dies { SolusVM::Client::Specification::distil( {} ) }, qr/not an OpenAPI document/, 'a document with no paths is refused' );
+    like( dies { SolusVM::Client::Specification::distil( {} ) }, qr/not\ an\ OpenAPI\ document/, 'a document with no paths is refused' );
 
     my $nameless = { paths => { '/servers' => { get => {} } } };
-    like( dies { SolusVM::Client::Specification::distil($nameless) }, qr/no operationId/, 'an operation with no operationId is refused' );
+    like( dies { SolusVM::Client::Specification::distil($nameless) }, qr/no\ operationId/, 'an operation with no operationId is refused' );
 
     my $twice = {
         paths => {
@@ -128,7 +131,7 @@ subtest 'distil' => sub {
             '/machines' => { get => { operationId => 'list_servers' } },
         },
     };
-    like( dies { SolusVM::Client::Specification::distil($twice) }, qr/would both be called list_servers/, 'two operations wanting one name is refused' );
+    like( dies { SolusVM::Client::Specification::distil($twice) }, qr/would\ both\ be\ called\ list_servers/, 'two operations wanting one name is refused' );
 };
 
 subtest 'load' => sub {
@@ -152,7 +155,7 @@ subtest 'load' => sub {
     my $file      = File::Spec->catfile( "$directory", 'other.json' );
     open my $fh, '>', $file or die "could not write $file: $!\n";
     print {$fh} Cpanel::JSON::XS->new->utf8->encode( SolusVM::Client::Specification::distil( document() ) );
-    close $fh;
+    close $fh or die "could not finish writing $file: $!\n";
 
     my $other = SolusVM::Client::Specification::load( file => $file );
     is( scalar keys %{$other}, 4, 'a spec from a file is loaded instead' );
@@ -160,7 +163,7 @@ subtest 'load' => sub {
 };
 
 subtest 'fetch' => sub {
-    my $mock      = mock_http_tiny();
+    mock_http_tiny();
     my $directory = File::Temp->newdir();
 
     mock_request( 'GET /admin-docs.json', json_response( document() ) );
@@ -177,13 +180,11 @@ subtest 'fetch' => sub {
     mock_request( 'GET /admin-docs.json', { status => 500, reason => 'Internal Server Error', success => 0, headers => {}, content => q{} } );
     like(
         dies { SolusVM::Client::Specification::fetch( dir => "$directory", url => 'https://solus.test/admin-docs.json' ) },
-        qr/Could not fetch the SolusVM API spec.*500/s,
+        qr/Could\ not\ fetch\ the\ SolusVM\ API\ spec.*500/,
         'and a management node having a bad day is fatal',
     );
 
-    like( dies { SolusVM::Client::Specification::fetch() }, qr/needs a directory/, 'fetch with nowhere to write is refused' );
-
-    undef $mock;
+    like( dies { SolusVM::Client::Specification::fetch() }, qr/needs\ a\ directory/, 'fetch with nowhere to write is refused' );
 };
 
 done_testing();

@@ -1,6 +1,8 @@
-use v5.36;
+#!perl
+use 5.036;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aaxs';
+no autovivification;
 
 =head1 NAME
 
@@ -8,7 +10,7 @@ t/SolusVM-Client-Live.t - SolusVM::Client against a real management node
 
 =cut
 
-use Test2::V1 -i;
+use Test2::V1 qw{subtest like dies ok is in_set note diag skip_all done_testing};
 
 use FindBin::libs;
 use SolusVM::Client ();
@@ -86,13 +88,13 @@ subtest 'paginate' => sub {
 
     is( scalar @plans, $meta->{total}, 'walking the pages gets as many plans as the node counted' );
     ok( $meta->{last_page} > 1, 'and it took more than one page, so the walking was the thing being tested' );
-    note( sprintf 'walked %d plans over %d pages of %d', scalar @plans, $meta->{last_page}, $meta->{per_page} );
+    note( sprintf 'walked %d plans over %d pages of %d', scalar @plans, @{$meta}{qw{last_page per_page}} );
 };
 
 subtest 'a failure from the node itself' => sub {
     like(
         dies { $solus->get_an_existing_server( id => 999_999_999 ) },
-        qr/failed: 4\d\d/,
+        qr/failed:\ 4\d\d/,
         'asking after a server that is not there fails the way this client says failures look',
     );
     is( $solus->last_response->{status}, in_set( 403, 404 ), 'and the response is there to be looked at' );

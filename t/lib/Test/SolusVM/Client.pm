@@ -1,8 +1,9 @@
 package Test::SolusVM::Client;
 
-use v5.36;
+use 5.036;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aaxs';
+no autovivification;
 
 use Cpanel::JSON::XS ();
 use Exporter         qw{import};
@@ -14,7 +15,7 @@ use Test::MockModule ();
 
     use Test::SolusVM::Client qw{:all};
 
-    my $mock = mock_http_tiny();
+    mock_http_tiny();
     mock_request( 'GET /api/v1/servers', json_response( { data => [] } ) );
 
     my $client = SolusVM::Client->new( host => 'solus.test', token => 'sekrit' );
@@ -42,22 +43,26 @@ our %EXPORT_TAGS = ( all => \@EXPORT_OK );
 
 my %MOCKED;
 my @REQUESTS;
+my $GUARD;
 
 =func mock_http_tiny
 
-Returns the L<Test::MockModule> standing in for L<HTTP::Tiny>.  Keep it in a
-lexical: when it goes out of scope the real one comes back, which is what you
-want between one subtest and the next.
+Puts a stand-in in place of L<HTTP::Tiny/request> and forgets whatever an earlier
+call registered.  The stand-in is held here, so there is nothing for a test to
+keep in a lexical; it stays until the next call, or until the test ends.
 
 =cut
 
 sub mock_http_tiny {
     clear_mocks();
 
-    my $mock = Test::MockModule->new('HTTP::Tiny');
-    $mock->redefine( request => \&_answer );
+    # The old guard has to go before the new one is made: when it goes it puts
+    # back the real method, which would undo a mock that was already installed.
+    undef $GUARD;
+    $GUARD = Test::MockModule->new('HTTP::Tiny');
+    $GUARD->redefine( request => \&_answer );
 
-    return $mock;
+    return 1;
 }
 
 =func mock_request
@@ -90,12 +95,14 @@ as JSON.  Defaults to a 200.
 sub json_response ( $document, %options ) {
     my $status = $options{status} // 200;
 
+    my $json = Cpanel::JSON::XS->new()->utf8()->canonical();
+
     return {
         status  => $status,
         reason  => $options{reason} // ( $status == 200 ? 'OK' : 'Error' ),
         success => ( $status >= 200 && $status < 300 ) ? 1 : 0,
         headers => { 'content-type' => 'application/json' },
-        content => Cpanel::JSON::XS->new->utf8->canonical->encode($document),
+        content => $json->encode($document),
     };
 }
 
@@ -137,7 +144,7 @@ sub clear_mocks {
     return 1;
 }
 
-sub _answer ( $self, $method, $url, $args = {} ) {
+sub _answer ( $, $method, $url, $args = {} ) {
     push @REQUESTS, {
         method  => $method,
         url     => $url,
@@ -146,7 +153,7 @@ sub _answer ( $self, $method, $url, $args = {} ) {
     };
 
     my $path = $url;
-    $path =~ s{^[a-z]+://[^/]+}{};
+    $path =~ s{^[[:lower:]]+://[^/]+}{};
     $path =~ s/[?].*$//;
 
     my $response = $MOCKED{"$method $path"};

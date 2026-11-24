@@ -1,8 +1,9 @@
 package SolusVM::Client;
 
-use v5.36;
+use 5.036;
 use warnings FATAL => 'all';
-use re '/aa';
+use re '/aaxs';
+no autovivification;
 
 use Cpanel::JSON::XS ();
 use HTTP::Tiny       ();
@@ -161,7 +162,7 @@ sub new ( $class, %options ) {
         %options,
     }, $class;
 
-    die "SolusVM::Client needs the host of a management node.\n" unless defined $self->{host} && length $self->{host};
+    die "SolusVM::Client needs the host of a management node.\n" unless $self->{host};
     die "SolusVM::Client needs either a token, or the email and password to get one with.\n"
       unless defined $self->{token} || ( defined $self->{email} && defined $self->{password} );
 
@@ -192,7 +193,7 @@ the API prefix.
 =cut
 
 sub base_url ($self) {
-    my $port = defined $self->{port} && length $self->{port} ? ":$self->{port}" : q{};
+    my $port = $self->{port} ? ":$self->{port}" : q{};
     return "$self->{scheme}://$self->{host}$port$self->{prefix}";
 }
 
@@ -235,8 +236,8 @@ sub catalog ( $self, %options ) {
     foreach my $entry (@wanted) {
         my %required = map { $_ => 1 } @{ $entry->{required} };
 
-        $listing .= sprintf "%-46s %-6s %s\n",   $entry->{name}, $entry->{method}, $entry->{uri};
-        $listing .= sprintf "%-46s %s\n",        q{}, $entry->{summary} if length $entry->{summary};
+        $listing .= sprintf "%-46s %-6s %s\n",   @{$entry}{qw{name method uri}};
+        $listing .= sprintf "%-46s %s\n",        q{}, $entry->{summary} if $entry->{summary};
         $listing .= sprintf "%-46s query: %s\n", q{}, join q{ }, @{ $entry->{query_params} }                                   if @{ $entry->{query_params} };
         $listing .= sprintf "%-46s body:  %s\n", q{}, join q{ }, map { $required{$_} ? "$_*" : $_ } @{ $entry->{body_params} } if @{ $entry->{body_params} };
     }
@@ -384,18 +385,19 @@ sub _http ( $self, $name, $method, $url, %options ) {
     $request{headers}{'Authorization'} = 'Bearer ' . $self->token()                                       if $options{authorize} // 1;
     $request{content}                  = Cpanel::JSON::XS->new->utf8->canonical->encode( $options{body} ) if defined $options{body};
 
-    say {*STDERR} "SolusVM: $method $url" . ( defined $request{content} ? ' ' . _redact( $request{content} ) : q{} ) if $self->{debug};
+    warn "SolusVM: $method $url" . ( defined $request{content} ? ' ' . _redact( $request{content} ) : q{} ) . "\n" if $self->{debug};
 
     my $response = $self->{ua}->request( $method, $url, \%request );
     $self->{last_response} = $response;
 
-    say {*STDERR} "SolusVM: $response->{status} $response->{reason} " . _redact( $response->{content} // q{} ) if $self->{debug};
+    warn "SolusVM: $response->{status} $response->{reason} " . _redact( $response->{content} // q{} ) . "\n" if $self->{debug};
 
     die "SolusVM $name ($method $url) failed: $response->{status} $response->{reason}\n" . _redact( $response->{content} // q{} ) . "\n"
       unless $response->{success};
 
-    my $answer = length( $response->{content} // q{} ) ? Cpanel::JSON::XS->new->utf8->decode( $response->{content} ) : {};
-    @{$self}{qw{last_meta last_links}} = ( $answer->{meta}, $answer->{links} ) if ref $answer eq 'HASH';
+    my $content = $response->{content} // q{};
+    my $answer  = $content ne q{} ? Cpanel::JSON::XS->new->utf8->decode($content) : {};
+    @{$self}{qw{last_meta last_links}} = @{$answer}{qw{meta links}} if ref $answer eq 'HASH';
 
     return $answer;
 }
@@ -428,7 +430,7 @@ sub _needs_token ($self) {
 # Giving up means falling back on the retry in _request, which is a slower way
 # to notice an expired token but not a wrong one.
 sub _epoch_of ($when) {
-    return undef unless defined $when && length $when;
+    return undef unless $when;
 
     # strptime warns its way through a format that does not fit before failing,
     # and trying formats until one fits is the whole method here.
